@@ -1,9 +1,14 @@
+#pragma once
+#include <stdint.h>
+
 #if !defined(F_CPU)
     #warning "F_CPU not defined in makefile - now defined in softuart.h"
     #define F_CPU 3686400UL
 #endif
 
-#define SOFTUART_BAUD_RATE      2400
+#ifndef SOFTUART_BAUD_RATE
+#define SOFTUART_BAUD_RATE      4800
+#endif
 
 #if defined (__AVR_ATtiny25__) || defined (__AVR_ATtiny45__) || defined (__AVR_ATtiny85__)
     #define SOFTUART_RXPIN   PINB
@@ -47,11 +52,11 @@
 
     #define SOFTUART_RXPIN   PIND
     #define SOFTUART_RXDDR   DDRD
-    #define SOFTUART_RXBIT   PD0
+    #define SOFTUART_RXBIT   PD6
 
     #define SOFTUART_TXPORT  PORTD
     #define SOFTUART_TXDDR   DDRD
-    #define SOFTUART_TXBIT   PD1
+    #define SOFTUART_TXBIT   PD7
 
     #define SOFTUART_T_COMP_LABEL      TIMER0_COMPA_vect
     #define SOFTUART_T_COMP_REG        OCR0A
@@ -87,10 +92,21 @@
     #warning "Check SOFTUART_TIMERTOP: increase prescaler, lower F_CPU or use a 16 bit timer"
 #endif
 
-#define SOFTUART_IN_BUF_SIZE     32
+#define SOFTUART_IN_BUF_SIZE      32
+#define NEWDATA                   1
+#define NO_NEWDATA                0
+
+// Access to the buffer variables
+// Unless reset `su_inbuf` is essentially a ring buffer
+// Note that there is no method for detecting if `su_qin` passes `su_qout`
+// extern volatile static char           su_inbuf[SOFTUART_IN_BUF_SIZE];
+volatile static char           su_inbuf[SOFTUART_IN_BUF_SIZE];
+volatile static unsigned char  su_qin;
+volatile static unsigned char  su_newdata;
+static unsigned char           su_qout;
 
 // Init the Software Uart
-void softuart_init(void);
+void softuart_init(uint16_t baud);
 
 // Clears the contents of the input buffer.
 void softuart_flush_input_buffer( void );
@@ -123,3 +139,21 @@ void softuart_puts_p( const char *prg_s );
 // Helper-Macro - "automatically" inserts PSTR
 // when used: include avr/pgmspace.h before this include-file
 #define softuart_puts_P(s___) softuart_puts_p(PSTR(s___))
+
+// Functions for working with ring buffer
+uint8_t softuart_decr_index(uint8_t index);
+uint8_t softuart_incr_index(uint8_t index);
+uint8_t softuart_index_sub(uint8_t num, uint8_t sub);
+uint8_t softuart_index_add(uint8_t num, uint8_t add);
+
+// Functions to access ring buffer
+char softuart_buf_get_inpos( void );
+char softuart_buf_get_outpos( void );
+void softuart_buf_set_outpos( char outpos );
+void softuart_buf_set_newdata( char newdata );
+
+char softuart_buf_get( char outpos );
+
+uint8_t softuart_buf_get_packetstartpos( void );
+
+uint8_t softuart_find_packet(char *values, uint8_t *masks, uint8_t packetlength);

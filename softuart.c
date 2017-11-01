@@ -103,7 +103,7 @@ V0.4 (10/2010)
 - tested with ATmega324PV @ 1MHz internal RC and 2400bps
   (options for ATtiny25/45/85 still available)
 - added 3BSD license
-- removed redundant zero-init in declaration of qin and qout
+- removed redundant zero-init in declaration of su_qin and su_qout
 */
 
 /* Copyright (c) 2003, Colin Gittins
@@ -149,9 +149,13 @@ V0.4 (10/2010)
 
 // startbit and stopbit parsed internally (see ISR)
 #define RX_NUM_OF_BITS (8)
-volatile static char           inbuf[SOFTUART_IN_BUF_SIZE];
-volatile static unsigned char  qin;
-static unsigned char           qout;
+//extern volatile static char           su_inbuf[SOFTUART_IN_BUF_SIZE];
+//volatile static unsigned char  su_qin;
+//static unsigned char           su_qout;
+
+uint8_t startPos = 0;
+uint8_t endPos   = 0;
+
 volatile static unsigned char  flag_rx_off;
 volatile static unsigned char  flag_rx_ready;
 
@@ -166,162 +170,201 @@ volatile static unsigned short internal_tx_buffer; /* ! mt: was type uchar - thi
 #define set_tx_pin_low()       ( SOFTUART_TXPORT &= ~( 1 << SOFTUART_TXBIT ) )
 #define get_rx_pin_status()    ( SOFTUART_RXPIN  &   ( 1 << SOFTUART_RXBIT ) )
 
-ISR(SOFTUART_T_COMP_LABEL)
-{
-	static unsigned char flag_rx_waiting_for_stop_bit = SU_FALSE;
-	static unsigned char rx_mask;
-	
-	static unsigned char timer_rx_ctr;
-	static unsigned char bits_left_in_rx;
-	static unsigned char internal_rx_buffer;
-	
-	unsigned char start_bit, flag_in;
-	unsigned char tmp;
-	
-	// Transmitter Section
-	if ( flag_tx_busy == SU_TRUE ) {
-		tmp = timer_tx_ctr;
-		if ( --tmp == 0 ) { // if ( --timer_tx_ctr <= 0 )
-			if ( internal_tx_buffer & 0x01 ) {
-				set_tx_pin_high();
-			}
-			else {
-				set_tx_pin_low();
-			}
-			internal_tx_buffer >>= 1;
-			tmp = 3; // timer_tx_ctr = 3;
-			if ( --bits_left_in_tx == 0 ) {
-				flag_tx_busy = SU_FALSE;
-			}
-		}
-		timer_tx_ctr = tmp;
-	}
 
-	// Receiver Section
-	if ( flag_rx_off == SU_FALSE ) {
-		if ( flag_rx_waiting_for_stop_bit ) {
-			if ( --timer_rx_ctr == 0 ) {
-				flag_rx_waiting_for_stop_bit = SU_FALSE;
-				flag_rx_ready = SU_FALSE;
-				inbuf[qin] = internal_rx_buffer;
-				if ( ++qin >= SOFTUART_IN_BUF_SIZE ) {
-					// overflow - reset inbuf-index
-					qin = 0;
-				}
-			}
-		}
-		else {  // rx_test_busy
-			if ( flag_rx_ready == SU_FALSE ) {
-				start_bit = get_rx_pin_status();
-				// test for start bit
-				if ( start_bit == 0 ) {
-					flag_rx_ready      = SU_TRUE;
-					internal_rx_buffer = 0;
-					timer_rx_ctr       = 4;
-					bits_left_in_rx    = RX_NUM_OF_BITS;
-					rx_mask            = 1;
-				}
-			}
-			else {  // rx_busy
-				tmp = timer_rx_ctr;
-				if ( --tmp == 0 ) { // if ( --timer_rx_ctr == 0 ) {
-					// rcv
-					tmp = 3;
-					flag_in = get_rx_pin_status();
-					if ( flag_in ) {
-						internal_rx_buffer |= rx_mask;
-					}
-					rx_mask <<= 1;
-					if ( --bits_left_in_rx == 0 ) {
-						flag_rx_waiting_for_stop_bit = SU_TRUE;
-					}
-				}
-				timer_rx_ctr = tmp;
-			}
-		}
-	}
-}
+ISR(SOFTUART_T_COMP_LABEL)
+  {
+  static unsigned char flag_rx_waiting_for_stop_bit = SU_FALSE;
+  static unsigned char rx_mask;
+
+  static unsigned char timer_rx_ctr;
+  static unsigned char bits_left_in_rx;
+  static unsigned char internal_rx_buffer;
+
+  unsigned char start_bit, flag_in;
+  unsigned char tmp;
+
+  // Transmitter Section
+  if ( flag_tx_busy == SU_TRUE ) {
+    tmp = timer_tx_ctr;
+    if ( --tmp == 0 ) { // if ( --timer_tx_ctr <= 0 )
+      if ( internal_tx_buffer & 0x01 ) {
+        set_tx_pin_high();
+      }
+      else {
+        set_tx_pin_low();
+      }
+      internal_tx_buffer >>= 1;
+      tmp = 3; // timer_tx_ctr = 3;
+      if ( --bits_left_in_tx == 0 ) {
+        flag_tx_busy = SU_FALSE;
+      }
+    }
+    timer_tx_ctr = tmp;
+  }
+
+  // Receiver Section
+  if ( flag_rx_off == SU_FALSE ) {
+          if ( flag_rx_waiting_for_stop_bit ) {
+                  if ( --timer_rx_ctr == 0 ) {
+                          flag_rx_waiting_for_stop_bit = SU_FALSE;
+                          flag_rx_ready = SU_FALSE;
+                          su_inbuf[su_qin] = internal_rx_buffer;
+                          
+                          if ( ++su_qin >= SOFTUART_IN_BUF_SIZE ) {
+                                  // overflow - reset su_inbuf-index
+                                  su_qin = 0;
+                          }
+                          // Check if we are overflowing
+                          if ( su_newdata == NO_NEWDATA && su_qin == su_qout ) {
+                            // We are, so incriment su_qout as well
+                            if ( ++su_qout >= SOFTUART_IN_BUF_SIZE ) {
+                                  // overflow
+                                  su_qout = 0;
+                            }
+                          }
+                          // There is new data
+                          su_newdata = NEWDATA;
+                  }
+          }
+          else {  // rx_test_busy
+                  if ( flag_rx_ready == SU_FALSE ) {
+                          start_bit = get_rx_pin_status();
+                          // test for start bit
+                          if ( start_bit == 0 ) {
+                                  flag_rx_ready      = SU_TRUE;
+                                  internal_rx_buffer = 0;
+                                  timer_rx_ctr       = 4;
+                                  bits_left_in_rx    = RX_NUM_OF_BITS;
+                                  rx_mask            = 1;
+                          }
+                  }
+                  else {  // rx_busy
+                          tmp = timer_rx_ctr;
+                          if ( --tmp == 0 ) { // if ( --timer_rx_ctr == 0 ) {
+                                  // rcv
+                                  tmp = 3;
+                                  flag_in = get_rx_pin_status();
+                                  if ( flag_in ) {
+                                          internal_rx_buffer |= rx_mask;
+                                  }
+                                  rx_mask <<= 1;
+                                  if ( --bits_left_in_rx == 0 ) {
+                                          flag_rx_waiting_for_stop_bit = SU_TRUE;
+                                  }
+                          }
+                          timer_rx_ctr = tmp;
+                  }
+          }
+    }
+  }
+
 
 static void io_init(void)
 {
-	// TX-Pin as output
-	SOFTUART_TXDDR |=  ( 1 << SOFTUART_TXBIT );
-	// RX-Pin as input
-	SOFTUART_RXDDR &= ~( 1 << SOFTUART_RXBIT );
+  // TX-Pin as output
+  SOFTUART_TXDDR |=  ( 1 << SOFTUART_TXBIT );
+  // RX-Pin as input
+  SOFTUART_RXDDR &= ~( 1 << SOFTUART_RXBIT );
 }
 
-static void timer_init(void)
+static void timer_init( uint16_t baud )
 {
-	unsigned char sreg_tmp;
-	
-	sreg_tmp = SREG;
-	cli();
-	
-	SOFTUART_T_COMP_REG = SOFTUART_TIMERTOP;     /* set top */
+  unsigned char sreg_tmp;
 
-	SOFTUART_T_CONTR_REGA = SOFTUART_CTC_MASKA | SOFTUART_PRESC_MASKA;
-	SOFTUART_T_CONTR_REGB = SOFTUART_CTC_MASKB | SOFTUART_PRESC_MASKB;
+  sreg_tmp = SREG;
+  cli();
 
-	SOFTUART_T_INTCTL_REG |= SOFTUART_CMPINT_EN_MASK;
+  SOFTUART_T_COMP_REG = ( F_CPU/SOFTUART_PRESCALE/baud/3 - 1);     /* set top */
 
-	SOFTUART_T_CNT_REG = 0; /* reset counter */
-	
-	SREG = sreg_tmp;
+  SOFTUART_T_CONTR_REGA = SOFTUART_CTC_MASKA | SOFTUART_PRESC_MASKA;
+  SOFTUART_T_CONTR_REGB = SOFTUART_CTC_MASKB | SOFTUART_PRESC_MASKB;
+
+  SOFTUART_T_INTCTL_REG |= SOFTUART_CMPINT_EN_MASK;
+
+  SOFTUART_T_CNT_REG = 0; /* reset counter */
+
+  SREG = sreg_tmp;
 }
 
-void softuart_init( void )
+void softuart_init( uint16_t baud )
 {
-	flag_tx_busy  = SU_FALSE;
-	flag_rx_ready = SU_FALSE;
-	flag_rx_off   = SU_FALSE;
-	
-	set_tx_pin_high(); /* mt: set to high to avoid garbage on init */
+  flag_tx_busy  = SU_FALSE;
+  flag_rx_ready = SU_FALSE;
+  flag_rx_off   = SU_FALSE;
 
-	io_init();
-	timer_init();
+  set_tx_pin_high(); /* mt: set to high to avoid garbage on init */
+
+  io_init();
+  timer_init(baud);
 }
 
 static void idle(void)
 {
-	// timeout handling goes here 
-	// - but there is a "softuart_kbhit" in this code...
-	// add watchdog-reset here if needed
+  // timeout handling goes here 
+  // - but there is a "softuart_kbhit" in this code...
+  // add watchdog-reset here if needed
 }
 
 void softuart_turn_rx_on( void )
 {
-	flag_rx_off = SU_FALSE;
+  flag_rx_off = SU_FALSE;
 }
 
 void softuart_turn_rx_off( void )
 {
-	flag_rx_off = SU_TRUE;
+  flag_rx_off = SU_TRUE;
+}
+
+// Functions to access ring buffer
+char softuart_buf_get_inpos( void )
+{       
+  return su_qin;
+}
+char softuart_buf_get_outpos( void )
+{
+  return su_qout;
+}
+char softuart_buf_get( char outpos )
+{
+  return su_inbuf[outpos];
+}
+void softuart_buf_set_newdata( char newdata )
+{
+  su_newdata = newdata;
+}
+uint8_t softuart_buf_get_packetstartpos( void )
+{
+  return startPos;
 }
 
 char softuart_getchar( void )
 {
-	char ch;
+  char ch;
 
-	while ( qout == qin ) {
-		idle();
-	}
-	ch = inbuf[qout];
-	if ( ++qout >= SOFTUART_IN_BUF_SIZE ) {
-		qout = 0;
-	}
-	
-	return( ch );
+  while ( su_newdata == NO_NEWDATA ) {
+          idle();
+  }
+  ch = su_inbuf[su_qout];
+  if ( ++su_qout >= SOFTUART_IN_BUF_SIZE ) {
+          su_qout = 0;
+  }
+
+  if ( su_qout == su_qin ) {
+          su_newdata = NO_NEWDATA;
+  }
+
+  return( ch );
 }
 
 unsigned char softuart_kbhit( void )
 {
-	return( qin != qout );
+  return( su_qin != su_qout );
 }
 
 void softuart_flush_input_buffer( void )
 {
-	qin  = 0;
-	qout = 0;
+	su_qin  = 0;
+	su_qout = 0;
 }
 	
 unsigned char softuart_transmit_busy( void ) 
@@ -359,5 +402,116 @@ void softuart_puts_p( const char *prg_s )
 	}
 }
 
+// Ring buffer functions
+uint8_t softuart_decr_index(uint8_t index) {
+  return (index + (SOFTUART_IN_BUF_SIZE -1)) % SOFTUART_IN_BUF_SIZE;
+}
+
+uint8_t softuart_incr_index(uint8_t index) {
+  return (index + 1) % SOFTUART_IN_BUF_SIZE;
+}
+
+uint8_t softuart_index_sub(uint8_t num, uint8_t sub) {
+  return (num + (SOFTUART_IN_BUF_SIZE - sub)) % SOFTUART_IN_BUF_SIZE;
+}
+
+uint8_t softuart_index_add(uint8_t num, uint8_t add) {
+  return (num + add) % SOFTUART_IN_BUF_SIZE;
+}
+
+uint8_t modDiff(uint8_t in, uint8_t out)
+{
+  if (in == out) {
+    return SOFTUART_IN_BUF_SIZE;
+  }
+  return (SOFTUART_IN_BUF_SIZE - out + in) % SOFTUART_IN_BUF_SIZE;
+}
+
+void softuart_buf_set_outpos( char outpos )
+{
+  su_qout = outpos;
+}
+
+uint8_t checkStartByte(char bytetocheck) {
+  if ( bytetocheck == 'A') {
+    return 0;
+  } else {
+    return 1;
+  }
+}
+
+uint8_t checkByteHeader(char bytetocheck, char value, uint8_t mask){
+  
+  
+  if ( (bytetocheck & mask) == (uint8_t)value ) {
+    return 0;
+  } else {
+    return 1;
+  }
+}
+
+uint8_t checkPacketByteHeaders(
+  uint8_t startpos, 
+  uint8_t packetlength,
+  char    *values,
+  uint8_t *masks
+  ) {
+  // Loop over packet bytes incrimenting counter when each correct header is found
+  uint8_t correctheaders = 0;
+  for (uint8_t i = 0; i < packetlength; i++){
+    
+    if (  checkByteHeader(
+          su_inbuf[softuart_index_add(startpos, i)],
+          values[i],
+          masks[i]) == 0 )
+    {
+      correctheaders++;
+    }
+  }
+  if (correctheaders == packetlength) {
+    return 0;
+  } else {
+    return 1;
+  }
+}
+
+uint8_t softuart_find_packet(char *values, uint8_t *masks, uint8_t packetlength){
+  // NOTE: The position su_qin contains no data unless su_qout == su_qin
+  //  hence the need for a packetlength + 1 everywhere.
+   
+  // Ensure the loop never goes longer than SOFTUART_IN_BUF_SIZE
+  uint8_t saveus = SOFTUART_IN_BUF_SIZE;
+  
+  // Check for packet if there is new data
+  if (su_newdata != NEWDATA) {
+    return 1;
+  } 
+  
+  // Check if there are (not) more 
+  // than packetlength bits of new data
+  if ( modDiff(su_qin, su_qout) < packetlength + 1) {
+    return 1;
+  }
+  
+  // Check each packet starting from su_qin -1 - packetlength to su_qout
+  for (
+      uint8_t o = softuart_index_sub(su_qin, packetlength);
+      modDiff(o, su_qout) != SOFTUART_IN_BUF_SIZE - 1;
+      o = softuart_decr_index(o)
+    ){
+    // Check if there is a packet starting at o
+    if ( checkPacketByteHeaders(o, packetlength, values, masks) == 0 ){
+      startPos = o;
+      endPos = softuart_index_add(o, packetlength);
+      return 0;
+    }
+    
+    // Check we have not overrun
+    if (saveus-- <= 0) {
+      return 1;
+    }
+  }
+  return 1;
+}
 
 
